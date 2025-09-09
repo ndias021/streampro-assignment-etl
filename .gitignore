@@ -207,7 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 # data
-data
+data/raw
+data/trusted
 
 # pycharm config
 .idea
