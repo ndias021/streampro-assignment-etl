@@ -101,7 +101,7 @@ class LandingToRawProcessor(BaseProcessor):
             logger.error(f"Failed to list landing files: {e}")
             return {}
         
-        logger.info(f"📊 Found {len(extracted_files)} files in landing bucket")
+        logger.info(f"Found {len(extracted_files)} files in landing bucket")
         return extracted_files
     
     def _transform(self, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -132,7 +132,7 @@ class LandingToRawProcessor(BaseProcessor):
                 )
                 
                 if success:
-                    logger.info(f"📁 Copied {file_info['name']} -> {file_info['raw_key']}")
+                    logger.info(f"Copied {file_info['name']} -> {file_info['raw_key']}")
                     successful_copies += 1
                 else:
                     failed_copies.append({
@@ -170,17 +170,17 @@ class LandingToRawProcessor(BaseProcessor):
     
     def _post_process(self, load_result: ProcessingResult) -> None:
         """Post-process: Log raw layer copy summary"""
-        logger.info("🔍 Raw layer copy summary")
+        logger.info("Raw layer copy summary")
         
-        logger.info(f"Landing → Raw Copy Complete:")
-        logger.info(f"   Files copied: {load_result.metadata['successful_copies']}")
-        logger.info(f"   Partition: ingestion_date={load_result.metadata['ingestion_date']}")
-        logger.info(f"      Raw path: {self.raw_prefix}/ingestion_date={self.ingestion_date}/")
+        logger.info(f"Landing to Raw Copy Complete:")
+        logger.info(f"Files copied: {load_result.metadata['successful_copies']}")
+        logger.info(f"Partition: ingestion_date={load_result.metadata['ingestion_date']}")
+        logger.info(f"Raw path: {self.raw_prefix}/ingestion_date={self.ingestion_date}/")
         
         if load_result.metadata['failed_copies']:
-            logger.warning(f"       Failed copies: {len(load_result.metadata['failed_copies'])}")
+            logger.warning(f"Failed copies: {len(load_result.metadata['failed_copies'])}")
         
-        logger.info("   Files are now available in raw layer for trusted transformation")
+        logger.info("Files are now available in raw layer for trusted transformation")
     
     def cleanup(self):
         """Cleanup resources"""
