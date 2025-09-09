@@ -50,9 +50,9 @@ class LandingToRawProcessor(BaseProcessor):
         # Override ingestion_date if provided via command line
         if args and hasattr(args, 'ingestion_date') and args.ingestion_date:
             self.ingestion_date = args.ingestion_date
-            logger.info(f"🗓️ Using specified ingestion_date: {self.ingestion_date}")
+            logger.info(f"Using specified ingestion_date: {self.ingestion_date}")
         else:
-            logger.info(f"🗓️ Using current date as ingestion_date: {self.ingestion_date}")
+            logger.info(f"Using current date as ingestion_date: {self.ingestion_date}")
         
     def _extract(self) -> Dict[str, Any]:
         """Extract: List files from MinIO landing bucket"""
@@ -95,7 +95,7 @@ class LandingToRawProcessor(BaseProcessor):
                         'raw_key': f"{self.raw_prefix}/ingestion_date={file_date}/{file_name}"
                     }
                     extracted_files[table_type] = file_info
-                    logger.debug(f"📄 Found file: {file_name} -> {table_type} ({file_date})")
+                    logger.debug(f"Found file: {file_name} -> {table_type} ({file_date})")
             
         except Exception as e:
             logger.error(f"Failed to list landing files: {e}")
@@ -106,7 +106,7 @@ class LandingToRawProcessor(BaseProcessor):
     
     def _transform(self, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
         """Transform: No transformation - just pass through with partition paths"""
-        logger.info("🔄 No transformation - preparing for direct copy with ingestion_date partition")
+        logger.info("No transformation - preparing for direct copy with ingestion_date partition")
         
         if not self.use_trino:
             return super()._transform(extracted_data)
