@@ -7,12 +7,12 @@ from minio import Minio
 from minio.error import S3Error
 from loguru import logger
 try:
-    from config import settings
+    from src.utils.config import settings
 except ImportError:
     import sys
     from pathlib import Path
     sys.path.append(str(Path(__file__).parent.parent.parent))
-    from config import settings
+    from src.utils.config import settings
 
 
 class MinIOClient:
@@ -111,6 +111,18 @@ class MinIOClient:
             logger.error(f"Error listing objects: {e}")
             return []
     
+    def copy_object(self, source_key: str, target_key: str) -> bool:
+        """Copy object within the same bucket"""
+        try:
+            from minio.commonconfig import CopySource
+            copy_source = CopySource(self.bucket, source_key)
+            self.client.copy_object(self.bucket, target_key, copy_source)
+            logger.info(f"Copied {source_key} -> {target_key}")
+            return True
+        except S3Error as e:
+            logger.error(f"Error copying {source_key} to {target_key}: {e}")
+            return False
+
     def delete_object(self, object_name: str) -> bool:
         try:
             self.client.remove_object(self.bucket, object_name)
