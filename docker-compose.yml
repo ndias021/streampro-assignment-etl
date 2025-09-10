@@ -1,5 +1,5 @@
 services:
-  # PostgreSQL for Airflow metadata and Hive Metastore
+  # PostgreSQL for Hive Metastore
   postgres:
     image: postgres:15
     environment:
@@ -106,71 +106,7 @@ services:
       timeout: 10s
       retries: 5
 
-  # Airflow Webserver
-  airflow-webserver:
-    image: apache/airflow:2.8.0-python3.10
-    platform: linux/amd64
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__FERNET_KEY: "Vt3mQHjgVJTI6HgHH9VlYA0GZMXgGYO6Gz8DJYPNwgY="
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__WEBSERVER__RBAC: "true"
-      AIRFLOW__WEBSERVER__AUTHENTICATE: "true"
-      AIRFLOW__WEBSERVER__AUTH_BACKEND: "airflow.contrib.auth.backends.password_auth"
-      _AIRFLOW_WWW_USER_USERNAME: admin
-      _AIRFLOW_WWW_USER_PASSWORD: admin
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./src:/opt/airflow/src
-      - ./config:/opt/airflow/config
-      - ./data:/opt/airflow/data
-      - ./pyproject.toml:/opt/airflow/pyproject.toml
-      - airflow_logs:/opt/airflow/logs
-    ports:
-      - "8080:8080"
-    command: >
-      bash -c "pip install --no-deps trino minio loguru pydantic-settings &&
-               airflow db init &&
-               airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com &&
-               airflow webserver"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Airflow Scheduler
-  airflow-scheduler:
-    image: apache/airflow:2.8.0-python3.10
-    platform: linux/amd64
-    depends_on:
-      airflow-webserver:
-        condition: service_healthy
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__FERNET_KEY: "Vt3mQHjgVJTI6HgHH9VlYA0GZMXgGYO6Gz8DJYPNwgY="
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./src:/opt/airflow/src  
-      - ./config:/opt/airflow/config
-      - ./data:/opt/airflow/data
-      - ./pyproject.toml:/opt/airflow/pyproject.toml
-      - airflow_logs:/opt/airflow/logs
-    command: >
-      bash -c "pip install --no-deps trino minio loguru pydantic-settings &&
-               airflow scheduler"
 
 volumes:
   minio_data:
   postgres_data:
-  airflow_logs:
