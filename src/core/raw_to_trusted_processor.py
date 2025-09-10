@@ -14,10 +14,8 @@ except ImportError:
     sys.path.append(str(Path(__file__).parent.parent.parent))
     from src.utils.config import settings
 
-from src.connect.trino_client import DataLakeManager
-from src.utils.schema_registry import (
-    get_all_trusted_tables, build_view_ddl
-)
+from src.connect.duckdb_client import DataLakeManager
+from src.utils.schema_registry import get_all_trusted_tables
 
 
 class RawToTrustedProcessor(BaseProcessor):
@@ -27,9 +25,8 @@ class RawToTrustedProcessor(BaseProcessor):
         self.processor_id = processor_id
         self.description = "Transform raw data to trusted layer with parquet format"
         
-        # Initialize Trino Data Lake Manager - mandatory
         self.datalake = DataLakeManager()
-        logger.info("Trino Data Lake Manager initialized")
+        logger.info("DuckDB Data Lake Manager initialized")
             
         self.raw_prefix = settings.RAW_PREFIX
         self.trusted_prefix = settings.TRUSTED_PREFIX
@@ -157,9 +154,6 @@ class RawToTrustedProcessor(BaseProcessor):
         successful_loads = 0
         failed_loads = []
         
-        # Create schema if needed
-        self.datalake.create_database_schema("streampro")
-        
         # Write transformed data as parquet files
         for table_key, table_data in transformed_data.items():
             try:
@@ -217,86 +211,50 @@ class RawToTrustedProcessor(BaseProcessor):
         )
     
     def _post_process(self, load_result: ProcessingResult) -> None:
-        """Post-process: Create external tables pointing to trusted parquet files"""
-        logger.info("Creating external tables for trusted parquet files")
+        """Post-process: Create DuckDB views pointing to trusted parquet files"""
+        logger.info("Creating DuckDB views for trusted parquet files")
         
-        if load_result.metadata.get('trino_enabled'):
-            logger.info("Trino Trusted Parquet Data Lake Mode:")
-            logger.info(f"Pipeline processed: {len(load_result.metadata.get('tables_processed', []))} data sources")
-            logger.info(f"Processing date: {load_result.metadata['ingestion_date']}")
-            logger.info(f"Target format: {load_result.metadata['format']} with {load_result.metadata['compression']} compression")
-            logger.info(f"Partitioned tables for optimized queries")
-            
-            # Create external tables pointing to the parquet files we just wrote
-            logger.info("Creating external tables for trusted parquet data...")
+        logger.info("DuckDB Trusted Parquet Data Lake Mode:")
+        logger.info(f"Pipeline processed: {len(load_result.metadata.get('tables_processed', []))} data sources")
+        logger.info(f"Processing date: {load_result.metadata['ingestion_date']}")
+        logger.info(f"Target format: {load_result.metadata['format']} with {load_result.metadata['compression']} compression")
+        logger.info(f"Partitioned tables for optimized queries")
+        
+        # Set up all trusted tables from parquet files - DuckDB makes this trivial!
+        success = self.datalake.setup_trusted_tables_from_parquet(self.ingestion_date)
+        
+        if success:
+            # Get stats for each table to show what's available
             external_tables_created = []
-            
-            # Use schema registry to get all trusted tables
             for table_name in get_all_trusted_tables():
                 try:
-                    # Try to read the parquet file directly from MinIO
-                    parquet_path = f"{self.trusted_prefix}/{table_name.replace('trusted_', '')}/ingestion_date={self.ingestion_date}/data.parquet"
-                    df = self.datalake.minio.read_parquet(parquet_path)
-                    
-                    if df is not None and not df.empty:
-                        # Get actual columns from the dataframe
-                        actual_columns = df.columns.tolist()
-                        logger.debug(f"Actual columns in {table_name}: {actual_columns}")
-                        
-                        # Create a view with the data (limited to first 100 rows for views)
-                        values_list = []
-                        for _, row in df.head(100).iterrows():
-                            # Build value tuple based on actual columns
-                            values = []
-                            for col in actual_columns:
-                                val = row[col]
-                                # Handle different data types
-                                if pd.isna(val):
-                                    values.append('NULL')
-                                elif isinstance(val, (int, float)):
-                                    values.append(str(val))
-                                else:
-                                    # Escape single quotes in strings
-                                    val_str = str(val).replace("'", "''")
-                                    values.append(f"'{val_str}'")
-                            values_list.append(f"({', '.join(values)})")
-                        
-                        if values_list:
-                            # Use build_view_ddl from schema registry
-                            create_view_sql = build_view_ddl(table_name, values_list)
-                            
-                            cursor = self.datalake.trino.execute_query(create_view_sql)
-                            cursor.fetchall()
-                            external_tables_created.append(table_name)
-                            logger.success(f"Created view: {table_name}")
-                    else:
-                        logger.warning(f"No data found for {table_name} in MinIO")
-                    
-                    try:
-                        test_query = f"SELECT COUNT(*) FROM hive.streampro.{table_name}"
-                        cursor = self.datalake.trino.execute_query(test_query)
-                        count = cursor.fetchall()
-                        logger.info(f"Table {table_name} has {count[0][0] if count else 0} rows")
-                    except Exception as e:
-                        logger.debug(f"Could not query {table_name}: {e}")
-                    
+                    stats = self.datalake.get_table_stats(table_name)
+                    if stats.get('row_count', 0) > 0:
+                        external_tables_created.append(table_name)
+                        logger.info(f"{table_name}: {stats['row_count']:,} rows ready for analytics")
                 except Exception as e:
-                    logger.warning(f"Could not create external table {table_name}: {e}")
+                    logger.warning(f"Could not get stats for {table_name}: {e}")
             
             if external_tables_created:
-                logger.info(f"Created {len(external_tables_created)} external tables for trusted parquet data")
-                logger.info("Example trusted layer analytical queries:")
+                logger.info(f"Created {len(external_tables_created)} DuckDB views for trusted parquet data")
+                logger.info("ALL DATA AVAILABLE! Example analytical queries:")
                 for table_name in external_tables_created:
-                    logger.info(f"   SELECT COUNT(*) FROM hive.streampro.{table_name};")
-                    logger.info(f"   SELECT * FROM hive.streampro.{table_name} LIMIT 5;")
+                    logger.info(f"   SELECT COUNT(*) FROM {table_name};")
+                    logger.info(f"   SELECT * FROM {table_name} LIMIT 5;")
                 
                 load_result.tables_created.extend(external_tables_created)
                 load_result.metadata['external_tables_created'] = len(external_tables_created)
+                load_result.metadata['full_dataset_available'] = True
             else:
-                logger.info("External table creation pending - need actual parquet files in S3")
-            
+                logger.warning("No tables were successfully created")
+                load_result.metadata['full_dataset_available'] = False
+        else:
+            logger.error("Failed to setup trusted tables from parquet files")
+            load_result.metadata['full_dataset_available'] = False
+        
         load_result.metadata['data_lake_ready'] = True
         load_result.metadata['analytics_ready'] = True
+        load_result.metadata['engine'] = 'DuckDB'
     
     def cleanup(self):
         """Cleanup resources"""
