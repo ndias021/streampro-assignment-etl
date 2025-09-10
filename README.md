@@ -1,266 +1,103 @@
 # StreamPro ETL Pipeline
 
-A modern data lakehouse ETL pipeline for analyzing video streaming user engagement patterns using Trino (Athena-like) and MinIO (S3-compatible storage).
+A simple data engineering pipeline that processes streaming video analytics data through landing -> raw -> trusted layers.
 
-## Overview
-
-This ETL pipeline processes streaming platform data to answer key business questions about user retention, engagement, and drop-off patterns. The pipeline uses a modern data lakehouse architecture with Trino as the query engine and MinIO for scalable object storage.
-
-## Architecture
-
-### Data Flow
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   Landing   │───▶│     Raw     │───▶│   Trusted   │───▶│  Enriched   │
-│  (CSV/JSON) │    │ (Partitioned│    │  (Parquet)  │    │ (Analytics) │
-│             │    │  by date)   │    │             │    │             │
-└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
-       │                   │                   │                   │
-       ▼                   ▼                   ▼                   ▼
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│ Local Files │    │MinIO Storage│    │MinIO Storage│    │MinIO Storage│
-│             │    │(Date Partns)│    │(Parquet +   │    │(Aggregated) │
-│             │    │             │    │ Compression)│    │             │
-└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
-                            ▲                   ▲                   ▲
-                            │                   │                   │
-                    ┌───────┴───────────────────┴───────────────────┴───────┐
-                    │              Trino Query Engine                       │
-                    │        (Athena-like distributed SQL)                  │
-                    └───────────────────────────────────────────────────────┘
-```
-
-### Technology Stack
-- **Storage**: MinIO (S3-compatible object storage)
-- **Query Engine**: Trino (distributed SQL query engine)
-- **Metadata**: Hive Metastore + PostgreSQL
-- **Orchestration**: Simple Python pipeline (`src/jobs/pipeline.py`)
-- **Format**: Parquet with Snappy compression
-- **Language**: Python 3.10+ with Poetry
-
-### Directory Structure
-```
-src/
-├── connect/          # Trino and MinIO client connections
-├── core/            # Job manager and processor classes
-├── jobs/            # ETL job entry points
-└── catalog/         # Schema definitions and business queries
-
-data/
-└── landing/         # Source data files with dates
-    ├── events_2025-09-09.jsonl
-    ├── users_2025-09-09.csv
-    ├── videos_2025-09-09.csv
-    └── devices_2025-09-09.csv
-
-config/              # Environment configurations
-docker-compose.yml   # Infrastructure services
-trino/               # Trino configuration files
-```
-
-## Business Questions Addressed
-
-1. **Q1**: What % of new users reach at least 30 seconds of watch_time in their first session?
-2. **Q2**: Which video genres drive the highest 2nd-session retention within 3 days?
-3. **Q3**: Is there a particular device_os or app_version where drop-off is abnormally high?
-
-## Quick Start
-
-### Prerequisites
-
-- Docker & Docker Compose
-- Python 3.10+
-- Poetry
+## How to Setup & Run
 
 ### 1. Start Infrastructure
-
 ```bash
-# Start all services (Trino, MinIO, PostgreSQL, Hive Metastore)
 docker-compose up -d
-
-# Check services are running
-docker-compose ps
 ```
+This starts:
+- MinIO (S3-like storage) at http://localhost:9000
+- MinIO Console at http://localhost:9001 (admin/minioadmin)
 
-### 2. Install Python Dependencies
-
+### 2. Install Dependencies
 ```bash
-# Install dependencies with Poetry
 poetry install
-
-# Activate virtual environment
 poetry shell
 ```
 
-### 3. Verify Data Files
+### 3. Run the Pipeline
 
-Your landing data should be in `data/landing/` with date suffixes:
-```
-data/landing/
-├── devices_2025-09-09.csv
-├── events_2025-09-09.jsonl  
-├── users_2025-09-09.csv
-└── videos_2025-09-09.csv
-```
-
-## How to Run
-
-### Option 1: Complete Pipeline (Recommended)
-
+**Process data from landing � raw:**
 ```bash
-# Run the complete pipeline: landing → raw → trusted
-poetry run python src/jobs/pipeline.py --env dev --ingestion_date 2025-09-09
+python -m src.core.to_raw_processor --env dev --ingestion_date 2025-09-09
 ```
 
-### Option 2: Individual Jobs
-
+**Process data from raw � trusted:**
 ```bash
-# Process landing → raw (with date partitioning)
-poetry run python src/jobs/to_raw.py --env dev --ingestion_date 2025-09-09
-
-# Process raw → trusted (Parquet conversion)
-poetry run python src/jobs/to_trusted.py --env dev --ingestion_date 2025-09-09
+python -m src.core.to_trusted_processor --env dev --ingestion_date 2025-09-09
 ```
 
-### Option 3: Interactive Analysis
-
+**Or run the full pipeline:**
 ```bash
-# Start Jupyter for data exploration
-poetry run jupyter lab
-
-# Or explore via Trino CLI (if available)
-trino --server localhost:8081 --catalog hive --schema streampro
+python pipeline.py --env dev --ingestion_date 2025-09-09
 ```
 
-## Services & Ports
+## Sample Data
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| Trino | 8081 | SQL Query Engine (Athena-like) |
-| MinIO | 9000/9001 | Object Storage (S3-compatible) |
-| PostgreSQL | 5432 | Metadata Storage |
-| Hive Metastore | 9083 | Table Metadata |
+I added sample data in the `data/` folder to simulate real-world scenarios:
+- `data/users_2025-09-09.csv`
+- `data/videos_2025-09-09.csv` 
+- `data/devices_2025-09-09.csv`
+- `data/events_2025-09-09.jsonl`
 
-## Data Schema
+This emulates data arriving at the landing layer, then being processed through raw and trusted layers.
 
-### Fact Table: `events_2025-09-09.jsonl` 
-- User interaction events (play, pause, stop, etc.)
-- ~13K records with user engagement patterns
+## Data Analysis Results
 
-### Dimension Tables:
-- `users_2025-09-09.csv` - User profiles (100 users)
-- `videos_2025-09-09.csv` - Video catalog (20 videos) 
-- `devices_2025-09-09.csv` - Device types (5 devices)
+See `src/notebooks/analysis.ipynb` for full analysis. Key findings:
 
-## Pipeline Stages
+### Q1: What % of new users reach at least 30 seconds of watch_time in their first session?
+**Answer: 1.0%**
+- Only 1 out of 100 users (user_78) reached 30+ seconds in first session
+- 97 users had some watch time, but most had very short sessions
 
-### Stage 1: Landing → Raw (Date Partitioned)
-- Uploads files from local landing to MinIO object storage
-- Creates date-based partitions: `raw/ingestion_date=2025-09-09/`
-- Extracts date from filename automatically
-- Creates Trino external table definitions
+### Q2: Which video genres drive the highest 2nd-session retention within 3 days?
+**Answer: Comedy**
+- All genres have 100% binary retention (everyone comes back)
+- But Comedy drives highest quality engagement:
+  - 80.6 seconds average subsequent watch time
+  - 7.4 average subsequent sessions 
+  - 595.9 engagement quality score
 
-**Processor**: `LandingToRawProcessor`
-**Job**: `python src/jobs/to_raw.py`
+### Q3: Is there a particular device_os or app_version where drop-off is abnormally high?
+**Answer: iOS + 2.0.1**
+- There is abnormally high drop-off in: iOS + 2.0.1
 
-### Stage 2: Raw → Trusted (Parquet Transformation)
-- Queries raw data via Trino SQL
-- Applies data quality rules and business logic
-- Converts to compressed Parquet format with optimal partitioning
-- Creates trusted tables for analytics
+## Architecture
 
-**Processor**: `RawToTrustedProcessor`
-**Job**: `python src/jobs/to_trusted.py`
+```
+Landing Layer  -> Raw Layer              -> Trusted Layer           -> Analytics
+CSV/JSON files -> CSV/JSON files (as-is) -> Processed Parquet files -> DuckDB queries
 
-### Stage 3: Trusted → Enriched (Business Analytics)
-- Aggregates trusted data for business questions
-- Creates session-level and user journey metrics
-- Generates performance analytics by device/genre
-
-**Job**: `python src/jobs/to_enriched.py`
-
-## Key Tables Created
-
-### Raw Layer (Partitioned by Date)
-- `raw_events`: Raw event data partitioned by `ingestion_date`
-- `raw_users`: User dimension data with date partitions
-- `raw_videos`: Video catalog with date partitions
-- `raw_devices`: Device reference data with date partitions
-
-### Trusted Layer (Parquet Format)
-- `trusted_events`: Cleaned event stream with business logic applied
-- `trusted_users`: Validated user profiles with data quality checks
-- `trusted_videos`: Clean video catalog with derived attributes
-- `trusted_devices`: Standardized device information
-
-### Enriched Layer (Business Analytics)
-- `user_sessions`: Session-level metrics and engagement analysis
-- `user_journey`: User lifecycle and retention analysis
-- `genre_performance`: Video genre performance metrics
-- `device_analytics`: Device/app version performance analysis
-
-## Configuration
-
-Edit `config.py` or environment-specific files in `config/`:
-- `config/dev.env` - Development settings
-- `config/prod.env` - Production settings
-
-Key settings:
-```python
-MINIO_ENDPOINT = "localhost:9000" 
-TRINO_HOST = "localhost"
-TRINO_PORT = 8081
-LOCAL_DATA_PATH = "data/landing"
+Landing: files from `./data are dropped into MinIO when service starts
+Raw: Parquet files are copied from Landing as is
+Trusted: Parquet files are created from Raw files
+Analytics: DuckDB queries are run on Trusted Parquet files in MinIO S3
 ```
 
-## File Processing Logic
+- **MinIO**: Emulates AWS S3 for data lake storage
+- **DuckDB**: Emulates AWS Athena for fast analytics
+- **Parquet**: Columnar storage format for efficient queries
 
-Files are automatically processed based on naming convention:
-- `table_YYYY-MM-DD.ext` → Extract date and table type
-- Partitioned in MinIO as: `raw/ingestion_date=YYYY-MM-DD/`
-- Converted to Parquet in: `trusted/table_name/`
+## Next Steps
 
-## Troubleshooting
+### Option 1: On-Premise Setup
+- **Orchestration**: Kubernetes + Docker + Airflow
+- **Storage**: MinIO (S3-compatible)
+- **Analytics**: DuckDB 
+- **Monitoring**: Grafana + Loki
+- **Logs**: PostgreSQL
 
-### Services not starting
-```bash
-# Check Docker logs
-docker-compose logs trino
-docker-compose logs minio
+### Option 2: Cloud Setup (AWS)
+- **Orchestration**: Step Functions
+- **Compute**: Lambda + Glue
+- **Storage**: S3 
+- **Analytics**: Athena
+- **Logs**: DynamoDB
+- **Secrets**: Secrets Manager
+- **SQL Tables**: RDS (if needed)
 
-# Restart services
-docker-compose restart
-```
-
-### Python import errors
-```bash
-# Install in development mode
-poetry install --with dev
-
-# Or set PYTHONPATH
-export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
-```
-
-### MinIO connection issues
-- Check MinIO is accessible: http://localhost:9001
-- Default credentials: minioadmin/minioadmin
-- Verify bucket `streampro-data` exists
-
-### Trino query failures
-- Verify Hive Metastore is running
-- Check table metadata in information_schema
-- Test connection: `curl http://localhost:8081/v1/info`
-
-## Development
-
-### Adding New Processors
-1. Extend `BaseProcessor` class
-2. Implement ETL methods: `_extract()`, `_transform()`, `_load()`
-3. Create job script in `src/jobs/`
-
-### Schema Changes
-1. Update processor schema definitions
-2. Modify Trino table DDL
-3. Update business query logic
-
-For questions or issues, check the logs in each service container.
+Both setups would provide production-grade scalability, monitoring, and reliability.
