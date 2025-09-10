@@ -22,17 +22,17 @@ poetry shell
 
 **Process data from landing � raw:**
 ```bash
-python -m src.core.to_raw_processor --env dev --ingestion_date 2025-09-09
+poetry run python src/core/to_raw.py --env dev --ingestion_date 2025-09-09
 ```
 
 **Process data from raw � trusted:**
 ```bash
-python -m src.core.to_trusted_processor --env dev --ingestion_date 2025-09-09
+poetry run python src/core/to_trusted.py --env dev --ingestion_date 2025-09-09
 ```
 
 **Or run the full pipeline:**
 ```bash
-python pipeline.py --env dev --ingestion_date 2025-09-09
+poetry run python src/core/pipeline.py --env dev --ingestion_date 2025-09-09
 ```
 
 ## Sample Data
