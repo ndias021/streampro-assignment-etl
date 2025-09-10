@@ -207,8 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 # data
-#data/raw
-#data/trusted
+data/.minio.sys
+data/streampro-data
 
 # pycharm config
 .idea
