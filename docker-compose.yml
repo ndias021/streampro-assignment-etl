@@ -1,0 +1,58 @@
+services:
+
+  # MinIO for data lake storage
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"  
+      - "9001:9001"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO initialization - uploads data files to landing layer
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./data:/data:ro  # Mount data files as read-only
+    entrypoint: ["/bin/sh"]
+    command: 
+      - -c
+      - |
+        echo 'Starting MinIO initialization...';
+        
+        # Configure MinIO client
+        mc alias set myminio http://minio:9000 minioadmin minioadmin;
+        
+        # Create bucket if not exists
+        mc mb myminio/streampro-data --ignore-existing;
+        
+        # Upload landing files (only if not already present)
+        echo 'Uploading data files to landing layer...';
+        mc cp /data/devices_2025-09-09.csv myminio/streampro-data/landing/devices_2025-09-09.csv || echo 'devices file upload failed or already exists';
+        mc cp /data/events_2025-09-09.jsonl myminio/streampro-data/landing/events_2025-09-09.jsonl || echo 'events file upload failed or already exists';
+        mc cp /data/users_2025-09-09.csv myminio/streampro-data/landing/users_2025-09-09.csv || echo 'users file upload failed or already exists';
+        mc cp /data/videos_2025-09-09.csv myminio/streampro-data/landing/videos_2025-09-09.csv || echo 'videos file upload failed or already exists';
+        
+        echo 'Listing files in landing layer:';
+        mc ls myminio/streampro-data/landing/ || echo 'Landing directory not found or empty';
+        
+        echo 'MinIO initialization complete!';
+
+
+
+volumes:
+  minio_data:
