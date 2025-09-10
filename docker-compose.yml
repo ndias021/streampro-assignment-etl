@@ -1,0 +1,176 @@
+services:
+  # PostgreSQL for Airflow metadata and Hive Metastore
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    command: ["postgres", "-c", "password_encryption=md5"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO for data lake storage
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"  
+      - "9001:9001"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO initialization - uploads data files to landing layer
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./data:/data:ro  # Mount data files as read-only
+    entrypoint: ["/bin/sh"]
+    command: 
+      - -c
+      - |
+        echo 'Starting MinIO initialization...';
+        
+        # Configure MinIO client
+        mc alias set myminio http://minio:9000 minioadmin minioadmin;
+        
+        # Create bucket if not exists
+        mc mb myminio/streampro-data --ignore-existing;
+        
+        # Upload landing files (only if not already present)
+        echo 'Uploading data files to landing layer...';
+        mc cp /data/devices_2025-09-09.csv myminio/streampro-data/landing/devices_2025-09-09.csv || echo 'devices file upload failed or already exists';
+        mc cp /data/events_2025-09-09.jsonl myminio/streampro-data/landing/events_2025-09-09.jsonl || echo 'events file upload failed or already exists';
+        mc cp /data/users_2025-09-09.csv myminio/streampro-data/landing/users_2025-09-09.csv || echo 'users file upload failed or already exists';
+        mc cp /data/videos_2025-09-09.csv myminio/streampro-data/landing/videos_2025-09-09.csv || echo 'videos file upload failed or already exists';
+        
+        echo 'Listing files in landing layer:';
+        mc ls myminio/streampro-data/landing/ || echo 'Landing directory not found or empty';
+        
+        echo 'MinIO initialization complete!';
+
+  # Hive Metastore for Trino
+  hive-metastore:
+    image: apache/hive:3.1.3
+    platform: linux/amd64
+    environment:
+      - SERVICE_NAME=metastore
+      - DB_DRIVER=postgres
+      - SKIP_SCHEMA_INIT=false
+      - SERVICE_OPTS=-Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://postgres:5432/metastore -Djavax.jdo.option.ConnectionUserName=metastore -Djavax.jdo.option.ConnectionPassword=metastore -Dhadoop.proxyuser.hive.hosts=* -Dhadoop.proxyuser.hive.groups=*
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/9083"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Trino
+  trino:
+    image: trinodb/trino:latest
+    ports:
+      - "8081:8080"  # Trino web UI
+    environment:
+      - TRINO_ENVIRONMENT=development
+    volumes:
+      - ./infra/trino/etc:/etc/trino:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Airflow Webserver
+  airflow-webserver:
+    image: apache/airflow:2.8.0-python3.10
+    platform: linux/amd64
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: "Vt3mQHjgVJTI6HgHH9VlYA0GZMXgGYO6Gz8DJYPNwgY="
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__RBAC: "true"
+      AIRFLOW__WEBSERVER__AUTHENTICATE: "true"
+      AIRFLOW__WEBSERVER__AUTH_BACKEND: "airflow.contrib.auth.backends.password_auth"
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+      - ./pyproject.toml:/opt/airflow/pyproject.toml
+      - airflow_logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "pip install --no-deps trino minio loguru pydantic-settings &&
+               airflow db init &&
+               airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com &&
+               airflow webserver"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    image: apache/airflow:2.8.0-python3.10
+    platform: linux/amd64
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: "Vt3mQHjgVJTI6HgHH9VlYA0GZMXgGYO6Gz8DJYPNwgY="
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src  
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+      - ./pyproject.toml:/opt/airflow/pyproject.toml
+      - airflow_logs:/opt/airflow/logs
+    command: >
+      bash -c "pip install --no-deps trino minio loguru pydantic-settings &&
+               airflow scheduler"
+
+volumes:
+  minio_data:
+  postgres_data:
+  airflow_logs:

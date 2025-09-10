@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from src.core.simple_job_manager import JobManager
+from src.core.job_manager import JobManager
 from src.core.raw_to_trusted_processor import RawToTrustedProcessor
 
 

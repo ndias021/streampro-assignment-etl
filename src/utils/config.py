@@ -41,7 +41,6 @@ class Settings(BaseSettings):
     LANDING_PREFIX: Optional[str] = None
     RAW_PREFIX: Optional[str] = None
     TRUSTED_PREFIX: Optional[str] = None
-    ENRICHED_PREFIX: Optional[str] = None
     
     # Trino Configuration
     TRINO_HOST: Optional[str] = None
